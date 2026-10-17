@@ -1,6 +1,7 @@
 
 import { Request, Response } from "express";
 import pool from "../config/db";
+import { webhookQueue } from "../queues/webhookQueue";
 
 // Create a new event
 export async function createEvent(
@@ -68,11 +69,18 @@ export async function createEvent(
     );
 
     const insertResult = result as { insertId: number };
+    const eventId = insertResult.insertId;
 
+    // Add the event to the BullMQ delivery queue
+    await webhookQueue.add("deliver-webhook", {
+      eventId
+    });
+
+    // Return the created event
     return res.status(201).json({
-      message: "Event created successfully.",
+      message: "Event created and queued successfully.",
       event: {
-        id: insertResult.insertId,
+        id: eventId,
         endpoint_id,
         event_type: event_type.trim(),
         payload,
@@ -154,7 +162,7 @@ export async function getEventById(
   }
 }
 
-
+// Get events with pagination
 export async function getEvents(
   req: Request,
   res: Response
@@ -173,7 +181,8 @@ export async function getEvents(
       limit > 100
     ) {
       return res.status(400).json({
-        error: "Page must be positive and limit must be between 1 and 100."
+        error:
+          "Page must be positive and limit must be between 1 and 100."
       });
     }
 
@@ -182,7 +191,13 @@ export async function getEvents(
 
     // Fetch the requested page
     const [rows] = await pool.execute(
-      `SELECT id, endpoint_id, event_type, payload, status, created_at
+      `SELECT
+         id,
+         endpoint_id,
+         event_type,
+         payload,
+         status,
+         created_at
        FROM events
        ORDER BY id DESC
        LIMIT ? OFFSET ?`,
@@ -194,7 +209,10 @@ export async function getEvents(
       "SELECT COUNT(*) AS total FROM events"
     );
 
-    const countResult = countRows as { total: number | string }[];
+    const countResult = countRows as {
+      total: number | string;
+    }[];
+
     const total = Number(countResult[0].total);
 
     return res.status(200).json({
