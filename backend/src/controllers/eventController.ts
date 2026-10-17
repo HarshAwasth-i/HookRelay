@@ -153,3 +153,64 @@ export async function getEventById(
     });
   }
 }
+
+
+export async function getEvents(
+  req: Request,
+  res: Response
+) {
+  try {
+    // Read pagination parameters from the URL
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 10);
+
+    // Validate pagination parameters
+    if (
+      !Number.isInteger(page) ||
+      page < 1 ||
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 100
+    ) {
+      return res.status(400).json({
+        error: "Page must be positive and limit must be between 1 and 100."
+      });
+    }
+
+    // Calculate how many records to skip
+    const offset = (page - 1) * limit;
+
+    // Fetch the requested page
+    const [rows] = await pool.execute(
+      `SELECT id, endpoint_id, event_type, payload, status, created_at
+       FROM events
+       ORDER BY id DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    // Count all events for pagination metadata
+    const [countRows] = await pool.execute(
+      "SELECT COUNT(*) AS total FROM events"
+    );
+
+    const countResult = countRows as { total: number | string }[];
+    const total = Number(countResult[0].total);
+
+    return res.status(200).json({
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      },
+      events: rows
+    });
+  } catch (error) {
+    console.error("Get events error:", error);
+
+    return res.status(500).json({
+      error: "Internal server error."
+    });
+  }
+}
