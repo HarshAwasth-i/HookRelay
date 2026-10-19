@@ -1,5 +1,6 @@
 
 import { Worker, Job } from "bullmq";
+import { createHmac } from "crypto";
 import pool from "../config/db";
 import redisConnection from "../config/redis";
 
@@ -16,14 +17,15 @@ const deliveryWorker = new Worker<WebhookJobData>(
 
     console.log(`Processing webhook event ${eventId}`);
 
-    // Fetch the event and its destination URL
+    // Fetch the event, destination URL, and endpoint secret
     const [rows] = await pool.execute(
       `SELECT
          e.id,
          e.endpoint_id,
          e.event_type,
          e.payload,
-         w.url
+         w.url,
+         w.secret
        FROM events e
        JOIN webhook_endpoints w ON w.id = e.endpoint_id
        WHERE e.id = ?`,
@@ -36,6 +38,7 @@ const deliveryWorker = new Worker<WebhookJobData>(
       event_type: string;
       payload: unknown;
       url: string;
+      secret: string;
     }[];
 
     if (events.length === 0) {
@@ -50,32 +53,44 @@ const deliveryWorker = new Worker<WebhookJobData>(
         ? JSON.parse(event.payload)
         : event.payload;
 
+    // Serialize once so the signed content matches the sent body
+    const payloadString = JSON.stringify(payload);
+
+    // Generate an HMAC-SHA256 signature using the endpoint secret
+    const signature = createHmac("sha256", event.secret)
+      .update(payloadString)
+      .digest("hex");
+
     // Mark the event as processing
     await pool.execute(
       `UPDATE events SET status = 'processing' WHERE id = ?`,
       [eventId]
     );
 
-    // Send the webhook HTTP request
+    // Track the destination response for delivery_attempts
     let responseStatus: number | null = null;
-    let errorMessage: string | null = null;
 
     try {
+      // Send the signed webhook HTTP request
       const response = await fetch(event.url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-HookRelay-Event": event.event_type,
-          "X-HookRelay-Event-Id": String(event.id)
+          "X-HookRelay-Event-Id": String(event.id),
+          "X-HookRelay-Signature": `sha256=${signature}`
         },
-        body: JSON.stringify(payload),
+        body: payloadString,
         signal: AbortSignal.timeout(10000)
       });
 
       responseStatus = response.status;
 
+      // Treat non-2xx responses as failed deliveries
       if (!response.ok) {
-        throw new Error(`Destination returned HTTP ${response.status}`);
+        throw new Error(
+          `Destination returned HTTP ${response.status}`
+        );
       }
 
       // Record the successful attempt
@@ -94,8 +109,10 @@ const deliveryWorker = new Worker<WebhookJobData>(
 
       console.log(`Event ${eventId} delivered successfully`);
     } catch (error) {
-      errorMessage =
-        error instanceof Error ? error.message : "Unknown delivery error";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Unknown delivery error";
 
       // Record the failed attempt
       await pool.execute(
@@ -110,19 +127,21 @@ const deliveryWorker = new Worker<WebhookJobData>(
         ]
       );
 
-      // Mark as failed; the retry configuration will be added next
-    // Mark as failed only after the final attempt
-const isFinalAttempt =
-  job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+      // Keep the event pending while retries remain.
+      // Mark it failed only after the final attempt.
+      const isFinalAttempt =
+        job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 
-await pool.execute(
-  `UPDATE events SET status = ? WHERE id = ?`,
-  [isFinalAttempt ? "failed" : "pending", eventId]
-);
+      await pool.execute(
+        `UPDATE events SET status = ? WHERE id = ?`,
+        [isFinalAttempt ? "failed" : "pending", eventId]
+      );
 
-      console.error(`Event ${eventId} delivery failed: ${errorMessage}`);
+      console.error(
+        `Event ${eventId} delivery failed: ${errorMessage}`
+      );
 
-      // Re-throw so BullMQ knows the job failed
+      // Re-throw so BullMQ can perform configured retries
       throw error;
     }
   },
