@@ -60,6 +60,7 @@ const deliveryWorker = new Worker<WebhookJobData>(
     const signature = createHmac("sha256", event.secret)
       .update(payloadString)
       .digest("hex");
+      console.log("Signature length:", signature.length);
 
     // Mark the event as processing
     await pool.execute(
