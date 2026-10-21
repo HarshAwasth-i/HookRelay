@@ -3,6 +3,19 @@ import { Worker, Job } from "bullmq";
 import { createHmac } from "crypto";
 import pool from "../config/db";
 import redisConnection from "../config/redis";
+const guardedFetch = async (
+  url: string,
+  options: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    signal: AbortSignal;
+    followRedirects?: boolean;
+  }
+): Promise<Response> => {
+  const module = await import("guarded-fetch");
+  return module.guardedFetch(url, options);
+};
 
 // Data received from the BullMQ queue
 interface WebhookJobData {
@@ -60,7 +73,6 @@ const deliveryWorker = new Worker<WebhookJobData>(
     const signature = createHmac("sha256", event.secret)
       .update(payloadString)
       .digest("hex");
-      console.log("Signature length:", signature.length);
 
     // Mark the event as processing
     await pool.execute(
@@ -72,8 +84,9 @@ const deliveryWorker = new Worker<WebhookJobData>(
     let responseStatus: number | null = null;
 
     try {
-      // Send the signed webhook HTTP request
-      const response = await fetch(event.url, {
+      // Send the webhook with SSRF-aware destination protection.
+      // Redirects must not be followed to another destination.
+      const response = await guardedFetch(event.url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,8 +94,9 @@ const deliveryWorker = new Worker<WebhookJobData>(
           "X-HookRelay-Event-Id": String(event.id),
           "X-HookRelay-Signature": `sha256=${signature}`
         },
-        body: payloadString,
-        signal: AbortSignal.timeout(10000)
+      body: payloadString,
+signal: AbortSignal.timeout(10000),
+followRedirects: false
       });
 
       responseStatus = response.status;
