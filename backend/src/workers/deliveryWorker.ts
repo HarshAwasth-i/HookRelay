@@ -167,6 +167,16 @@ followRedirects: false
 );
 
 // Log worker events
+// Log worker events
+deliveryWorker.on("completed", (job) => {
+  console.log(`Job ${job.id} completed`);
+});
+
+deliveryWorker.on("failed", (job, error) => {
+  console.error(`Job ${job?.id} failed: ${error.message}`);
+});
+
+// Recover the database status when BullMQ detects a stalled job
 deliveryWorker.on("completed", (job) => {
   console.log(`Job ${job.id} completed`);
 });

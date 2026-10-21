@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "worker": "tsx watch src/workers/deliveryWorker.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "recover": "tsx src/scripts/recoverStuckEvents.ts"
   },
   "keywords": [],
   "author": "",
