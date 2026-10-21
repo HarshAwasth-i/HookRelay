@@ -3,6 +3,12 @@ import { Request, Response } from "express";
 import { randomBytes } from "crypto";
 import { isIP } from "net";
 import pool from "../config/db";
+const assertUrlIsSafeToFetch = async (
+  url: string
+): Promise<void> => {
+  const module = await import("guarded-fetch");
+  await module.assertUrlIsSafeToFetch(url);
+};
 
 // Check whether an IPv4 address belongs to a blocked range
 function isBlockedIPv4(ip: string): boolean {
@@ -10,7 +16,10 @@ function isBlockedIPv4(ip: string): boolean {
 
   if (
     parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    parts.some(
+      (part) =>
+        !Number.isInteger(part) || part < 0 || part > 255
+    )
   ) {
     return true;
   }
@@ -18,16 +27,16 @@ function isBlockedIPv4(ip: string): boolean {
   const [a, b, c] = parts;
 
   return (
-    a === 0 ||                         // Current network / unspecified
-    a === 10 ||                        // Private
-    a === 127 ||                       // Loopback
-    (a === 100 && b >= 64 && b <= 127) || // Shared address space
-    (a === 169 && b === 254) ||        // Link-local / metadata
-    (a === 172 && b >= 16 && b <= 31) || // Private
-    (a === 192 && b === 168) ||        // Private
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
     (a === 192 && b === 0 && c === 0) ||
     (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224                            // Multicast and reserved
+    a >= 224
   );
 }
 
@@ -44,7 +53,7 @@ function isBlockedIPv6(ip: string): boolean {
     return isBlockedIPv4(mapped[1]);
   }
 
-  // Handle IPv4-mapped addresses written in hexadecimal
+  // IPv4-mapped addresses written in hexadecimal
   const mappedHex = normalized.match(
     /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/
   );
@@ -73,8 +82,7 @@ function isBlockedIPv6(ip: string): boolean {
   );
 }
 
-// Validate URL syntax and reject obvious local/private destinations.
-// DNS resolution must also be checked before making outbound requests.
+// Validate URL syntax and reject obvious local/private destinations
 function validateWebhookUrl(value: string): URL | null {
   let parsedUrl: URL;
 
@@ -88,12 +96,12 @@ function validateWebhookUrl(value: string): URL | null {
     return null;
   }
 
-  // Credentials in URLs are unnecessary and can obscure destinations.
+  // Reject credentials in URLs
   if (parsedUrl.username || parsedUrl.password) {
     return null;
   }
 
-  // Reject fragments because they are not sent to the HTTP server.
+  // Reject URL fragments
   if (parsedUrl.hash) {
     return null;
   }
@@ -103,7 +111,7 @@ function validateWebhookUrl(value: string): URL | null {
     .replace(/^\[|\]$/g, "")
     .replace(/\.$/, "");
 
-  // Block local and commonly reserved internal hostnames.
+  // Block local and commonly reserved internal hostnames
   if (
     hostname === "localhost" ||
     hostname.endsWith(".localhost") ||
@@ -147,6 +155,16 @@ export async function createWebhook(
       return res.status(400).json({
         error:
           "Invalid or unsafe destination URL. Use a valid HTTP or HTTPS URL pointing to a public destination."
+      });
+    }
+
+    // Check DNS resolution and reject unsafe destination IPs
+    try {
+      await assertUrlIsSafeToFetch(parsedUrl.toString());
+    } catch {
+      return res.status(400).json({
+        error:
+          "The destination URL must resolve to a public IP address."
       });
     }
 
