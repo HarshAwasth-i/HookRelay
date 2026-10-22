@@ -92,7 +92,8 @@ const deliveryWorker = new Worker<WebhookJobData>(
           "Content-Type": "application/json",
           "X-HookRelay-Event": event.event_type,
           "X-HookRelay-Event-Id": String(event.id),
-          "X-HookRelay-Signature": `sha256=${signature}`
+          "X-HookRelay-Signature": `sha256=${signature}`,
+          "Idempotency-Key": `hookrelay-event-${event.id}`,
         },
       body: payloadString,
 signal: AbortSignal.timeout(10000),
