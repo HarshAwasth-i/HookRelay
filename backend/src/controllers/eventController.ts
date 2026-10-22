@@ -232,3 +232,62 @@ export async function getEvents(
     });
   }
 }
+
+// Get delivery attempts for a specific event
+export async function getEventAttempts(
+  req: Request,
+  res: Response
+) {
+  try {
+    const eventId = Number(req.params.id);
+
+    // Validate the event ID
+    if (!Number.isSafeInteger(eventId) || eventId <= 0) {
+      return res.status(400).json({
+        error: "A valid event ID is required."
+      });
+    }
+
+    // Check whether the event exists
+    const [eventRows] = await pool.execute(
+      `SELECT id
+       FROM events
+       WHERE id = ?`,
+      [eventId]
+    );
+
+    if ((eventRows as object[]).length === 0) {
+      return res.status(404).json({
+        error: "Event not found."
+      });
+    }
+
+    // Fetch delivery attempts in order
+    const [rows] = await pool.execute(
+      `SELECT
+         event_id,
+         attempt_number,
+         response_status,
+         error_message,
+         attempted_at
+       FROM delivery_attempts
+       WHERE event_id = ?
+       ORDER BY attempt_number ASC`,
+      [eventId]
+    );
+
+    const attempts = rows as object[];
+
+    return res.status(200).json({
+      event_id: eventId,
+      count: attempts.length,
+      attempts
+    });
+  } catch (error) {
+    console.error("Get event attempts error:", error);
+
+    return res.status(500).json({
+      error: "Internal server error."
+    });
+  }
+}
