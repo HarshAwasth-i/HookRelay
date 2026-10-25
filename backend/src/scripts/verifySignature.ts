@@ -1,10 +1,8 @@
-
 import { createHmac, timingSafeEqual } from "crypto";
 import pool from "../config/db";
 
 async function verifySignature() {
   try {
-    // Use the endpoint and payload from your successful test
     const endpointId = 3;
 
     const payload = {
@@ -12,7 +10,6 @@ async function verifySignature() {
       message: "Testing HMAC signatures"
     };
 
-    // Fetch the endpoint secret from MySQL
     const [rows] = await pool.execute(
       `SELECT secret
        FROM webhook_endpoints
@@ -28,17 +25,12 @@ async function verifySignature() {
 
     const secret = endpoints[0].secret;
 
-    // IMPORTANT: property order and exact JSON bytes must match
-    // the body that was sent to Webhook.site.
     const payloadString = JSON.stringify(payload);
 
-    // Calculate the expected HMAC
     const expectedSignature = createHmac("sha256", secret)
       .update(payloadString)
       .digest("hex");
 
-    // Paste only the signature value from Webhook.site here.
-    // Do not include the "sha256=" prefix.
     const receivedSignature = "3910cc5e624b61a5d3e8a416167b887b88873b20c4f4a241dc30bf8f6e86a411";
 
     if (!/^[a-f0-9]{64}$/i.test(receivedSignature)) {

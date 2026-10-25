@@ -10,6 +10,7 @@
     "start": "node dist/server.js",
     "recover": "tsx src/scripts/recoverStuckEvents.ts"
   },
+
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -23,6 +24,7 @@
     "ioredis": "^6.0.0",
     "mysql2": "^3.24.6"
   },
+
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
