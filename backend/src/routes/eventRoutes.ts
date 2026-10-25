@@ -13,3 +13,4 @@ router.get("/:id/attempts", getEventAttempts);
 router.get("/:id", getEventById);
 
 export default router;
+ 
